@@ -35,7 +35,7 @@ scrape_semaphore = None
 async def get_semaphore():
     global scrape_semaphore
     if scrape_semaphore is None:
-        # Bir vaqtning o'zida maksimal 10 kishiga ruxsat beradi
+        # Bir vaqtning o'zida maksimal 10 kishiga saytdan ma'lumot olishga ruxsat beradi
         scrape_semaphore = asyncio.Semaphore(10)
     return scrape_semaphore
 
@@ -47,7 +47,8 @@ class AdminStates(StatesGroup):
 
 async def send_sequential_messages(message, text):
     limit = 4000
-    if len(text) <= limit: await message.answer(text, parse_mode="HTML")
+    if len(text) <= limit: 
+        await message.answer(text, parse_mode="HTML")
     else:
         while len(text) > 0:
             split_at = text.rfind('\n', 0, limit) if len(text) > limit else len(text)
@@ -58,7 +59,9 @@ async def send_sequential_messages(message, text):
 def clean_html(text):
     return text.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", "").replace("<i>", "").replace("</i>", "")
 
-# --- 1. START VA MENYULAR ---
+# ==========================================
+# --- 1. START VA ASOSIY MENYULAR ---
+# ==========================================
 @dp.message(Command("start"))
 async def cmd_start(m: types.Message):
     is_new = update_user_activity(m.from_user)
@@ -98,7 +101,9 @@ async def toggle_settings(call: types.CallbackQuery):
     await call.message.edit_reply_markup(reply_markup=get_settings_kb(u_data))
     await call.answer("✅ Sozlama o'zgardi!")
 
-# --- 2. ADMIN ALOQA TIZIMI ---
+# ==========================================
+# --- 2. FOYDALANUVCHI VA ADMIN ALOQASI ---
+# ==========================================
 @dp.message(F.text == "👨‍💻 Bog'lanish")
 async def contact_h(m: types.Message):
     await m.answer("👨‍💻 Admin bilan bog'lanish uchun quyidagi tugmani bosing:", reply_markup=get_contact_kb(), parse_mode="HTML")
@@ -130,77 +135,9 @@ async def admin_reply_to_user(m: types.Message):
             await m.answer("✅ Javob yuborildi.")
         except Exception as e: await m.answer(f"❌ Xatolik: ({e})")
 
-# --- 3. LUG'AT QIDIRISH (KESH VA NAVBAT BILAN) ---
-@dp.message(F.text)
-async def handle_word(m: types.Message):
-    if m.text in ["📜 Tarix", "⚙️ Sozlamalar", "👨‍💻 Bog'lanish", "ℹ️ Yordam", "🔑 Admin Panel"]: return
-    word = m.text.strip().lower()
-    
-    # Faollikni va bazani yangilash
-    update_user_activity(m.from_user)
-    increment_search_count(m.from_user.id)
-    u_data = get_user_data(m.from_user.id)
-    
-    # Tarixni yangilash
-    if word in u_data['history']: u_data['history'].remove(word)
-    u_data['history'].insert(0, word)
-    u_data['history'] = u_data['history'][:15]
-    save_user_data(m.from_user.id, u_data)
-    
-    # 1. BAZADAN QIDIRISH (Kesh tekshiruvi)
-    data = get_word_cache(word)
-    
-    if data:
-        # Bazadan topildi - Navbatga turmaydi, tezkor javob
-        wait = await m.answer("⚡ <i>Xotiradan olinmoqda...</i>", parse_mode="HTML")
-    else:
-        # Bazada yo'q - Saytga kirish kerak, Navbat (Semaphore) ishga tushadi
-        wait = await m.answer("⏳ <i>Saytdan qidirilmoqda (Navbat kutilyapti)...</i>", parse_mode="HTML")
-        
-        sem = await get_semaphore()
-        async with sem: # MAX 10 ta so'rov qoidasi shu yerda ishlaydi
-            data = await asyncio.to_thread(scrape_longman_ultimate, word)
-            if data:
-                save_word_cache(word, data) # Kelajak uchun bazaga saqlab qo'yamiz
-                
-    await wait.delete()
-    
-    if not data: return await m.answer(f"❌ <b>{word}</b> so'zi lug'atdan topilmadi.", parse_mode="HTML")
-    
-    TEMP_CACHE[m.chat.id] = data
-    await m.answer(
-        f"📦 <b>{word.upper()}</b> uchun bo'limni tanlang:\n\n"
-        f"<i>Ma'nolarni ko'rish uchun pastdagi turkumlardan birini bosing.</i>", 
-        reply_markup=get_parts_kb(data.keys()), parse_mode="HTML"
-    )
-
-@dp.callback_query(F.data.startswith("v_"))
-async def process_view(call: types.CallbackQuery):
-    await call.answer()
-    choice = call.data.replace("v_", "")
-    data = TEMP_CACHE.get(call.message.chat.id)
-    u_data = get_user_data(call.from_user.id)
-    
-    if not data: return await call.message.answer("⚠️ Ma'lumot eskirgan, so'zni qayta qidiring.")
-    
-    prog = await call.message.edit_text("🔍")
-    for em in ["🎗", "✍️", "⌛"]:
-        await asyncio.sleep(0.3)
-        try: await prog.edit_text(em)
-        except: pass
-    
-    if choice == "all":
-        full_text = ""
-        for pos, content in data.items():
-            full_text += format_output(pos, content, u_data['show_examples'], u_data['show_translation']) + "═"*15 + "\n"
-        await send_sequential_messages(call.message, full_text)
-    else:
-        await send_sequential_messages(call.message, format_output(choice, data[choice], u_data['show_examples'], u_data['show_translation']))
-    
-    try: await prog.delete()
-    except: pass
-
-# --- 4. ADMIN PANEL ---
+# ==========================================
+# --- 3. ADMIN PANEL (TEPADA BO'LISHI SHART) ---
+# ==========================================
 @dp.message(F.text == "🔑 Admin Panel", F.chat.id == ADMIN_ID)
 async def admin_main(m: types.Message):
     await m.answer("🛠 <b>Admin Boshqaruv Paneli</b>", reply_markup=get_admin_kb(), parse_mode="HTML")
@@ -271,3 +208,75 @@ async def bc_process(m: types.Message, state: FSMContext):
                 await asyncio.sleep(0.05)
             except: pass
     await prog.edit_text(f"✅ Xabar {c} ta foydalanuvchiga yetkazildi.")
+
+# ==========================================
+# --- 4. LUG'AT QIDIRISH (ENG PASTDA BO'LISHI SHART) ---
+# ==========================================
+@dp.message(F.text)
+async def handle_word(m: types.Message):
+    # Agar foydalanuvchi adashib boshqa menyu tugmasini bossa, qidirib yurmaydi
+    if m.text in ["📜 Tarix", "⚙️ Sozlamalar", "👨‍💻 Bog'lanish", "ℹ️ Yordam", "🔑 Admin Panel"]: 
+        return
+        
+    word = m.text.strip().lower()
+    
+    # Faollikni va bazani yangilash
+    update_user_activity(m.from_user)
+    increment_search_count(m.from_user.id)
+    u_data = get_user_data(m.from_user.id)
+    
+    # Tarixni yangilash
+    if word in u_data['history']: u_data['history'].remove(word)
+    u_data['history'].insert(0, word)
+    u_data['history'] = u_data['history'][:15]
+    save_user_data(m.from_user.id, u_data)
+    
+    # 1. BAZADAN QIDIRISH (Kesh tekshiruvi)
+    data = get_word_cache(word)
+    
+    if data:
+        wait = await m.answer("⚡ <i>Xotiradan olinmoqda...</i>", parse_mode="HTML")
+    else:
+        wait = await m.answer("⏳ <i>Saytdan qidirilmoqda (Navbat kutilyapti)...</i>", parse_mode="HTML")
+        sem = await get_semaphore()
+        async with sem: # MAX 10 ta so'rov qoidasi
+            data = await asyncio.to_thread(scrape_longman_ultimate, word)
+            if data:
+                save_word_cache(word, data) # Kelajak uchun bazaga saqlab qo'yamiz
+                
+    await wait.delete()
+    
+    if not data: return await m.answer(f"❌ <b>{word}</b> so'zi lug'atdan topilmadi.", parse_mode="HTML")
+    
+    TEMP_CACHE[m.chat.id] = data
+    await m.answer(
+        f"📦 <b>{word.upper()}</b> uchun bo'limni tanlang:\n\n"
+        f"<i>Ma'nolarni ko'rish uchun pastdagi turkumlardan birini bosing.</i>", 
+        reply_markup=get_parts_kb(data.keys()), parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("v_"))
+async def process_view(call: types.CallbackQuery):
+    await call.answer()
+    choice = call.data.replace("v_", "")
+    data = TEMP_CACHE.get(call.message.chat.id)
+    u_data = get_user_data(call.from_user.id)
+    
+    if not data: return await call.message.answer("⚠️ Ma'lumot eskirgan, so'zni qayta qidiring.")
+    
+    prog = await call.message.edit_text("🔍")
+    for em in ["🎗", "✍️", "⌛"]:
+        await asyncio.sleep(0.3)
+        try: await prog.edit_text(em)
+        except: pass
+    
+    if choice == "all":
+        full_text = ""
+        for pos, content in data.items():
+            full_text += format_output(pos, content, u_data['show_examples'], u_data['show_translation']) + "═"*15 + "\n"
+        await send_sequential_messages(call.message, full_text)
+    else:
+        await send_sequential_messages(call.message, format_output(choice, data[choice], u_data['show_examples'], u_data['show_translation']))
+    
+    try: await prog.delete()
+    except: pass
