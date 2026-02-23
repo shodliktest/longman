@@ -50,6 +50,7 @@ def update_user_activity(user):
         user_ref = db.collection('users').document(str(user.id))
         doc = user_ref.get()
         now = get_uz_time()
+        today = now[:10] # Faqat sanani olamiz
         username = f"@{user.username}" if user.username else "Mavjud emas"
         
         if not doc.exists:
@@ -64,6 +65,19 @@ def update_user_activity(user):
                 "show_examples": True,
                 "show_translation": False
             })
+            
+            # 1. Umumiy userlar sonini oshirish (Counter)
+            stat_ref = db.collection('settings').document('stats')
+            if not stat_ref.get().exists:
+                stat_ref.set({"total_searches": 0, "page_views": 0, "total_users": 1})
+            else:
+                stat_ref.update({"total_users": firestore.Increment(1)})
+                
+            # 2. Grafik uchun kunlik userlar o'sishini yozish (Tejamkor)
+            db.collection('daily_user_stats').document(today).set({
+                "count": firestore.Increment(1)
+            }, merge=True)
+            
             return True 
         else:
             user_ref.update({
@@ -85,9 +99,10 @@ def increment_search_count(user_id):
         stat_ref.update({"total_searches": firestore.Increment(1)})
     except: pass
 
-def get_all_users():
+def get_all_users(limit_count=50):
+    # LIMIT QO'SHILDI: Endi jadval uchun faqat oxirgi 50 ta userni tortamiz!
     try:
-        docs = db.collection('users').order_by('joined_at', direction=firestore.Query.DESCENDING).stream()
+        docs = db.collection('users').order_by('joined_at', direction=firestore.Query.DESCENDING).limit(limit_count).stream()
         return [doc.to_dict() for doc in docs]
     except: return []
 
@@ -106,12 +121,22 @@ def increment_page_view():
 
 # --- SO'ZLAR KESHI (TEZKOR ISHLASH UCHUN) ---
 def save_word_cache(word, data):
-    """Qidirilgan so'zni qayta qidirmaslik uchun Firebase'ga saqlash"""
+    """Qidirilgan so'zni saqlash va GRAFIK uchun kunlik hisobni yuritish"""
     try:
+        now = get_uz_time()
+        today = now[:10] # Faqat sanani olamiz (YYYY-MM-DD)
+        
+        # 1. So'zni o'zini saqlaymiz
         db.collection('word_cache').document(word.lower()).set({
             'data': data,
-            'created_at': get_uz_time()
+            'created_at': now
         })
+        
+        # 2. GRAFIK UCHUN: Bugungi kunga +1 ta so'z qo'shamiz (Tejamkor hisobchi)
+        db.collection('daily_word_stats').document(today).set({
+            "count": firestore.Increment(1)
+        }, merge=True)
+        
     except: pass
 
 def get_word_cache(word):
@@ -122,3 +147,17 @@ def get_word_cache(word):
             return doc.to_dict().get('data')
     except: pass
     return None
+
+def get_daily_word_stats():
+    """Admin panel grafigi uchun kunlik o'sish tarixini olish"""
+    try:
+        docs = db.collection('daily_word_stats').stream()
+        return [{"date": doc.id, "count": doc.to_dict().get("count", 0)} for doc in docs]
+    except: return []
+
+def get_daily_user_stats():
+    """Admin panel grafigi uchun kunlik userlar o'sish tarixini olish"""
+    try:
+        docs = db.collection('daily_user_stats').stream()
+        return [{"date": doc.id, "count": doc.to_dict().get("count", 0)} for doc in docs]
+    except: return []
