@@ -10,7 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from config import BOT_TOKEN, ADMIN_ID
 from database import (
     update_user_activity, get_user_data, save_user_data, increment_search_count,
-    get_all_users, get_stats, get_uz_time
+    get_all_users, get_stats, get_uz_time, save_word_cache, get_word_cache
 )
 from scraper import scrape_longman_ultimate, format_output
 from keyboards import (
@@ -26,8 +26,18 @@ except Exception as e:
     st.error(f"Botni ishga tushirishda xatolik: {e}")
     st.stop()
 
-# Vaqtinchalik xotira (so'zlarning natijasini ushlab turish uchun)
+# Vaqtinchalik xotira
 TEMP_CACHE = {}
+
+# MAX 10 TA QIDIRUV (SEMAPHORE)
+scrape_semaphore = None
+
+async def get_semaphore():
+    global scrape_semaphore
+    if scrape_semaphore is None:
+        # Bir vaqtning o'zida maksimal 10 kishiga ruxsat beradi
+        scrape_semaphore = asyncio.Semaphore(10)
+    return scrape_semaphore
 
 class UserStates(StatesGroup):
     waiting_for_contact_msg = State()
@@ -120,7 +130,7 @@ async def admin_reply_to_user(m: types.Message):
             await m.answer("✅ Javob yuborildi.")
         except Exception as e: await m.answer(f"❌ Xatolik: ({e})")
 
-# --- 3. LUG'AT QIDIRISH (CORE) ---
+# --- 3. LUG'AT QIDIRISH (KESH VA NAVBAT BILAN) ---
 @dp.message(F.text)
 async def handle_word(m: types.Message):
     if m.text in ["📜 Tarix", "⚙️ Sozlamalar", "👨‍💻 Bog'lanish", "ℹ️ Yordam", "🔑 Admin Panel"]: return
@@ -131,13 +141,28 @@ async def handle_word(m: types.Message):
     increment_search_count(m.from_user.id)
     u_data = get_user_data(m.from_user.id)
     
+    # Tarixni yangilash
     if word in u_data['history']: u_data['history'].remove(word)
     u_data['history'].insert(0, word)
     u_data['history'] = u_data['history'][:15]
     save_user_data(m.from_user.id, u_data)
     
-    wait = await m.answer("⏳ <i>Qidirilmoqda...</i>", parse_mode="HTML")
-    data = await asyncio.to_thread(scrape_longman_ultimate, word)
+    # 1. BAZADAN QIDIRISH (Kesh tekshiruvi)
+    data = get_word_cache(word)
+    
+    if data:
+        # Bazadan topildi - Navbatga turmaydi, tezkor javob
+        wait = await m.answer("⚡ <i>Xotiradan olinmoqda...</i>", parse_mode="HTML")
+    else:
+        # Bazada yo'q - Saytga kirish kerak, Navbat (Semaphore) ishga tushadi
+        wait = await m.answer("⏳ <i>Saytdan qidirilmoqda (Navbat kutilyapti)...</i>", parse_mode="HTML")
+        
+        sem = await get_semaphore()
+        async with sem: # MAX 10 ta so'rov qoidasi shu yerda ishlaydi
+            data = await asyncio.to_thread(scrape_longman_ultimate, word)
+            if data:
+                save_word_cache(word, data) # Kelajak uchun bazaga saqlab qo'yamiz
+                
     await wait.delete()
     
     if not data: return await m.answer(f"❌ <b>{word}</b> so'zi lug'atdan topilmadi.", parse_mode="HTML")
