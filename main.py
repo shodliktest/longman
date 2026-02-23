@@ -43,7 +43,7 @@ try:
             
             fig = px.line(daily_users, x='date', y='Yangi Userlar', markers=True, template="plotly_dark")
             fig.update_traces(line_color='#00ffcc', marker=dict(size=8, color='#ff00ff'))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch') # YANGILANDI: Ogohlantirish bermaydi
             
         st.markdown("### 📋 Barcha Foydalanuvchilar Jadvali")
         show_cols = ['name', 'username', 'id', 'joined_at', 'search_count', 'last_active']
@@ -52,7 +52,7 @@ try:
             
         df_display = df[show_cols].copy()
         df_display.columns = ["Ism", "Username", "ID", "Qo'shilgan vaqti", "Qidiruvlari", "Oxirgi faollik"]
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        st.dataframe(df_display, width='stretch', hide_index=True) # YANGILANDI: Ogohlantirish bermaydi
         
 except Exception as e:
     st.warning(f"Xatolik yuz berdi: {e}")
