@@ -28,7 +28,6 @@ except Exception as e:
 
 # --- FOYDALANUVCHI BAZASI ---
 def get_user_data(user_id):
-    """Foydalanuvchi sozlamalari va tarixini olish"""
     try:
         doc = db.collection('users').document(str(user_id)).get()
         if doc.exists:
@@ -42,13 +41,11 @@ def get_user_data(user_id):
     return {"history": [], "show_examples": True, "show_translation": False}
 
 def save_user_data(user_id, user_dict):
-    """Foydalanuvchi qidiruv tarixi va sozlamalarini yangilash"""
     try:
         db.collection('users').document(str(user_id)).set(user_dict, merge=True)
     except: pass
 
 def update_user_activity(user):
-    """Foydalanuvchi faolligini yangilash (Qachon qo'shildi, oxirgi marta qachon kirdi)"""
     try:
         user_ref = db.collection('users').document(str(user.id))
         doc = user_ref.get()
@@ -67,7 +64,7 @@ def update_user_activity(user):
                 "show_examples": True,
                 "show_translation": False
             })
-            return True # Yangi foydalanuvchi
+            return True 
         else:
             user_ref.update({
                 "name": user.full_name,
@@ -78,12 +75,10 @@ def update_user_activity(user):
     except: return False
 
 def increment_search_count(user_id):
-    """Qidiruvlar sonini oshirish"""
     try:
         db.collection('users').document(str(user_id)).update({
             "search_count": firestore.Increment(1)
         })
-        # Umumiy statistikani ham oshiramiz
         stat_ref = db.collection('settings').document('stats')
         if not stat_ref.get().exists:
             stat_ref.set({"total_searches": 0, "page_views": 0})
@@ -91,14 +86,12 @@ def increment_search_count(user_id):
     except: pass
 
 def get_all_users():
-    """Admin panel uchun barcha foydalanuvchilarni olish"""
     try:
         docs = db.collection('users').order_by('joined_at', direction=firestore.Query.DESCENDING).stream()
         return [doc.to_dict() for doc in docs]
     except: return []
 
 def get_stats():
-    """Admin panel statistikasi"""
     try:
         doc = db.collection('settings').document('stats').get()
         if doc.exists: return doc.to_dict()
@@ -110,3 +103,22 @@ def increment_page_view():
         if not stat_ref.get().exists: stat_ref.set({"total_searches": 0, "page_views": 0})
         stat_ref.update({"page_views": firestore.Increment(1)})
     except: pass
+
+# --- SO'ZLAR KESHI (TEZKOR ISHLASH UCHUN) ---
+def save_word_cache(word, data):
+    """Qidirilgan so'zni qayta qidirmaslik uchun Firebase'ga saqlash"""
+    try:
+        db.collection('word_cache').document(word.lower()).set({
+            'data': data,
+            'created_at': get_uz_time()
+        })
+    except: pass
+
+def get_word_cache(word):
+    """So'z avval qidirilgan bo'lsa, uni yashin tezligida bazadan olish"""
+    try:
+        doc = db.collection('word_cache').document(word.lower()).get()
+        if doc.exists:
+            return doc.to_dict().get('data')
+    except: pass
+    return None
