@@ -3,6 +3,7 @@ def get_welcome_msg(name):
         f"👋 <b>Salom, {name}!</b>\n\n"
         f"📕 <b>Longman Ultimate Pro</b> botiga xush kelibsiz.\n"
         f"Menga istalgan inglizcha so'zni yuboring, men uning barcha ma'nolari, transkripsiyasi va misollarini keltirib beraman.\n\n"
+        f"⚙️ <b>Eslatma:</b> Pastdagi <i>Sozlamalar</i> menyusi orqali inglizcha misollarni o'chirib qo'yishingiz yoki <b>O'zbekcha tarjimani</b> yoqishingiz mumkin!\n\n"
         f"🚀 <i>Hoziroq biror so'z yozib yuboring!</i>"
     )
 
