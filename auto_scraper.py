@@ -16,6 +16,30 @@ DELAY_ON_ERROR  = 30    # Scraping xatosida kutish (soniya)
 DELAY_RESTART   = 120   # Butun ro'yxat tugaganda qayta boshlash (soniya)
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)"}
 
+# Faqat shu yo'llar bilan boshlanadigan URL'lar qabul qilinadi
+ALLOWED_PATH_PREFIXES = ("/dictionary/",)
+
+# Bu pattern bo'lgan URL'lar o'tkazib yuboriladi (english-japanese, english-chinese va h.k.)
+SKIP_PATTERNS = (
+    "english-japanese",
+    "english-chinese",
+    "english-french",
+    "english-german",
+    "english-spanish",
+    "english-italian",
+    "english-portuguese",
+    "english-polish",
+    "english-arabic",
+    "english-russian",
+    "business-english",
+    "pictures",
+    "topic",
+    "grammar",
+    "speaking",
+    "writing",
+    "pronunciation",
+)
+
 
 def _fetch_sitemap_urls(url):
     """Berilgan sitemap URL'dan barcha <loc> manzillarini qaytaradi."""
@@ -30,6 +54,21 @@ def _fetch_sitemap_urls(url):
             print(f"❌ Sitemap yuklanmadi [{attempt}/3]: {e}")
         time.sleep(10)
     return []
+
+
+def _is_valid_word_url(url):
+    """
+    Faqat /dictionary/ bo'limidagi, english-japanese kabi tarjima sahifalarisiz URLlarni qabul qiladi.
+    """
+    from urllib.parse import urlparse
+    path = urlparse(url).path
+    # Faqat /dictionary/ bilan boshlanishi shart
+    if not any(path.startswith(p) for p in ALLOWED_PATH_PREFIXES):
+        return False
+    # Keraksiz pattern'larni o'tkazib yuborish
+    if any(skip in url for skip in SKIP_PATTERNS):
+        return False
+    return True
 
 
 def _get_all_word_urls():
@@ -52,9 +91,9 @@ def _get_all_word_urls():
             # Bu kichik sitemap — uning ichidagi URLlarni olish
             sub_locs = _fetch_sitemap_urls(loc)
             for u in sub_locs:
-                if "/dictionary/" in u:
+                if _is_valid_word_url(u):
                     word_urls.append(u)
-        elif "/dictionary/" in loc:
+        elif _is_valid_word_url(loc):
             word_urls.append(loc)
 
     # Takrorlarni olib tashlash, tartibga keltirish
