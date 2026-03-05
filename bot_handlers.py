@@ -2,7 +2,7 @@ import asyncio
 import os
 import re
 import streamlit as st
-from auto_scraper import auto_fill_database
+from auto_scraper import start_scraper_thread
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -288,4 +288,4 @@ async def process_view(call: types.CallbackQuery):
 @dp.startup()
 async def on_startup(dispatcher: Dispatcher):
     # Bot ishga tushishi bilan auto_fill_database orqa fonda parallel boshlanadi
-    asyncio.create_task(auto_fill_database())
+    start_scraper_thread()
