@@ -161,3 +161,37 @@ def get_daily_user_stats():
         docs = db.collection('daily_user_stats').stream()
         return [{"date": doc.id, "count": doc.to_dict().get("count", 0)} for doc in docs]
     except: return []
+
+# --- ADMIN SO'ZLAR RO'YXATI (SCRAPER UCHUN) ---
+def save_word_list(words):
+    """Admin yuklagan so'zlar ro'yxatini Firebase'ga saqlaydi."""
+    try:
+        db.collection('settings').document('word_list').set({
+            'words': words,
+            'updated_at': get_uz_time(),
+            'count': len(words)
+        })
+    except: pass
+
+def get_word_list():
+    """Scraper uchun so'zlar ro'yxatini Firebase'dan oladi."""
+    try:
+        doc = db.collection('settings').document('word_list').get()
+        if doc.exists:
+            return doc.to_dict().get('words', [])
+    except: pass
+    return []
+
+def get_word_list_info():
+    """Admin panel uchun ro'yxat haqida ma'lumot."""
+    try:
+        doc = db.collection('settings').document('word_list').get()
+        if doc.exists:
+            d = doc.to_dict()
+            return {
+                'count': d.get('count', 0),
+                'updated_at': d.get('updated_at', '—'),
+                'words': d.get('words', [])
+            }
+    except: pass
+    return {'count': 0, 'updated_at': '—', 'words': []}

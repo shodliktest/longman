@@ -1,67 +1,94 @@
 import threading
 import time
-import requests
-from database import get_word_cache, save_word_cache
+from database import get_word_cache, save_word_cache, get_word_list, save_word_list
 from scraper import scrape_longman_ultimate
 
 # ═══════════════════════════════════════════════════════════════
-#  AVTO-SCRAPER — 20,000 ta eng ko'p ishlatiladigan ingliz so'zi
+#  AVTO-SCRAPER — Admin yuklagan TXT fayldagi so'zlarni saqlaydi
 #  Threading asosida, hech qachon to'xtamaydi
 # ═══════════════════════════════════════════════════════════════
 
-WORDS_URL     = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/20k.txt"
-DELAY_WORDS   = 5    # So'zlar orasidagi pauza (soniya) — sayt bloklamasligi uchun
-DELAY_ERROR   = 30   # Xato bo'lganda kutish (soniya)
-DELAY_RESTART = 300  # Ro'yxat tugagandan keyin qayta boshlash (soniya)
+DELAY_WORDS    = 5    # So'zlar orasidagi pauza (soniya)
+DELAY_ERROR    = 30   # Xato bo'lganda kutish (soniya)
+DELAY_NO_LIST  = 60   # Ro'yxat yo'q bo'lganda tekshirish oralig'i (soniya)
+
+_bot_instance  = None
+_admin_id      = None
 
 
-def _fetch_word_list():
-    """GitHub'dan 20,000 ta so'zni streaming usulda yuklaydi (RAM tejovchi)."""
-    print(f"📥 So'zlar ro'yxati yuklanmoqda: {WORDS_URL}")
-    for attempt in range(1, 4):
-        try:
-            response = requests.get(WORDS_URL, stream=True, timeout=15)
-            if response.status_code == 200:
-                words = []
-                for line in response.iter_lines():
-                    if line:
-                        word = line.decode('utf-8').strip().lower()
-                        if len(word) >= 2:
-                            words.append(word)
-                print(f"✅ {len(words)} ta so'z yuklandi.")
-                return words
-            else:
-                print(f"⚠️ HTTP {response.status_code} — ro'yxat yuklanmadi.")
-        except Exception as e:
-            print(f"❌ Yuklash xatosi [{attempt}/3]: {e}")
-        time.sleep(10)
-    return []
+def set_bot(bot, admin_id):
+    """main.py dan bot va admin_id ni uzatish uchun."""
+    global _bot_instance, _admin_id
+    _bot_instance = bot
+    _admin_id     = admin_id
+
+
+def _notify_admin(text):
+    """Adminga Telegram xabari yuboradi (sinxron)."""
+    if not _bot_instance or not _admin_id:
+        return
+    import asyncio
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_bot_instance.send_message(_admin_id, text, parse_mode="HTML"))
+        loop.close()
+    except Exception as e:
+        print(f"⚠️ Admin xabari yuborilmadi: {e}")
+
+
+def parse_word_list(text):
+    """
+    TXT fayl tarkibini parse qiladi.
+    Formatlar: vergul bilan (hello, call, low) yoki yangi qator
+    """
+    import re
+    words = re.split(r'[,\n\r]+', text)
+    result = []
+    for w in words:
+        w = w.strip().lower()
+        if len(w) >= 2:
+            result.append(w)
+    seen = set()
+    unique = []
+    for w in result:
+        if w not in seen:
+            seen.add(w)
+            unique.append(w)
+    return unique
+
+
+def upload_word_list(text):
+    """Admin yuklagan TXT matnini parse qilib Firebase'ga saqlaydi."""
+    words = parse_word_list(text)
+    if words:
+        save_word_list(words)
+        print(f"📋 Yangi ro'yxat saqlandi: {len(words)} ta so'z")
+    return len(words), words
 
 
 def _scraper_loop():
-    """
-    Asosiy sikl — hech qachon to'xtamaydi:
-      - Network xatosi    → DELAY_ERROR soniya kutib, keyingi so'zga o'tadi
-      - Scraping xatosi   → xuddi shunday
-      - Ro'yxat tugasa    → DELAY_RESTART soniya kutib, qaytadan boshidan
-      - Streamlit restart → daemon thread bo'lgani uchun ta'sir qilmaydi
-    """
-    print("🚀 Avto-scraper ishga tushdi! 20k so'zlar rejimi faollashdi.")
+    print("🚀 Avto-scraper ishga tushdi! Admin ro'yxati rejimi faollashdi.")
 
     while True:
-        words = _fetch_word_list()
+        words = get_word_list()
 
         if not words:
-            print(f"⏳ Ro'yxat yuklanmadi. {DELAY_RESTART}s kutib qayta urinadi...")
-            time.sleep(DELAY_RESTART)
+            print(f"⏳ So'zlar ro'yxati yo'q. {DELAY_NO_LIST}s kutib qayta tekshiradi...")
+            time.sleep(DELAY_NO_LIST)
             continue
 
-        skipped = 0
+        print(f"📋 Ro'yxatdan {len(words)} ta so'z topildi. Scraping boshlanadi...")
+        _notify_admin(
+            f"🚀 <b>Avto-scraper boshlandi!</b>\n"
+            f"📋 Ro'yxatda: <b>{len(words)} ta so'z</b>\n"
+            f"⏱ Taxminiy vaqt: ~{len(words) * DELAY_WORDS // 60} daqiqa"
+        )
+
         saved   = 0
+        skipped = 0
         errors  = 0
 
-        for word in words:
-            # ── Firebase'da borligini tekshir ────────────────────────
+        for i, word in enumerate(words):
             try:
                 existing = get_word_cache(word)
             except Exception as e:
@@ -70,19 +97,18 @@ def _scraper_loop():
 
             if existing:
                 skipped += 1
-                continue  # Allaqachon bor — keyingisiga (pauza yo'q, tez o'tadi)
+                continue
 
-            # ── Longman saytidan yuklab ol ────────────────────────────
             success = False
             for attempt in range(1, 4):
                 try:
                     data = scrape_longman_ultimate(word)
                     if data:
                         save_word_cache(word, data)
-                        print(f"✅ Saqlandi: {word}  (skip={skipped}, saved={saved+1})")
                         saved += 1
+                        print(f"✅ [{i+1}/{len(words)}] Saqlandi: {word}")
                     else:
-                        print(f"⚠️ Topilmadi: {word}")
+                        print(f"⚠️ [{i+1}/{len(words)}] Topilmadi: {word}")
                     success = True
                     break
                 except Exception as e:
@@ -92,37 +118,34 @@ def _scraper_loop():
 
             if not success:
                 errors += 1
-                print(f"🔁 O'tkazib yuborildi: {word}  (errors={errors})")
+                print(f"🔁 O'tkazib yuborildi: {word}")
 
             time.sleep(DELAY_WORDS)
 
-        print(
-            f"♻️  20k ro'yxat tugadi! "
-            f"saqlandi={saved}, o'tkazildi(bor edi)={skipped}, xato={errors}. "
-            f"{DELAY_RESTART}s kutib qayta boshlanadi..."
+        done_msg = (
+            f"✅ <b>Scraping yakunlandi!</b>\n\n"
+            f"📊 Natijalar:\n"
+            f"  ✅ Saqlandi: <b>{saved} ta</b>\n"
+            f"  ⏭ Allaqachon bor edi: <b>{skipped} ta</b>\n"
+            f"  ❌ Xato: <b>{errors} ta</b>\n\n"
+            f"📋 Yangi ro'yxat yuklash uchun admin paneldan foydalaning."
         )
-        time.sleep(DELAY_RESTART)
+        print(f"♻️ Ro'yxat tugadi! saved={saved}, skipped={skipped}, errors={errors}")
+        _notify_admin(done_msg)
+        save_word_list([])
+        print(f"⏳ Yangi ro'yxat kutilmoqda...")
+        time.sleep(DELAY_NO_LIST)
 
-
-# ═══════════════════════════════════════════════════════════════
-#  PUBLIC API
-# ═══════════════════════════════════════════════════════════════
 
 def start_scraper_thread():
-    """
-    Scraperiyi Telegram bot va Streamlit'dan butunlay ajratilgan
-    daemon thread'da ishlatadi. Streamlit qayta yuklansa ham to'xtamaydi.
-    """
     if any(t.name == "ScraperThread" for t in threading.enumerate()):
         print("ℹ️  ScraperThread allaqachon ishlamoqda.")
         return None
-
     t = threading.Thread(target=_scraper_loop, name="ScraperThread", daemon=True)
     t.start()
-    print("🧵 ScraperThread ishga tushirildi (Telegram va Streamlit'dan mustaqil).")
+    print("🧵 ScraperThread ishga tushirildi.")
     return t
 
 
-# Eski asyncio versiyasi bilan moslik (main.py o'zgartirmaslik uchun)
 async def auto_fill_database():
     start_scraper_thread()

@@ -35,6 +35,7 @@ def get_admin_kb():
     kb.button(text="📊 Statistika", callback_data="adm_stats")
     kb.button(text="📋 Userlar Ro'yxati", callback_data="adm_list_menu")
     kb.button(text="📢 Broadcast", callback_data="adm_bc")
+    kb.button(text="📁 So'zlar Ro'yxatini Yuklash", callback_data="adm_upload_words")
     kb.adjust(1)
     return kb.as_markup()
 

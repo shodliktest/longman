@@ -289,3 +289,61 @@ async def process_view(call: types.CallbackQuery):
 async def on_startup(dispatcher: Dispatcher):
     # Bot ishga tushishi bilan auto_fill_database orqa fonda parallel boshlanadi
     asyncio.create_task(auto_fill_database())
+
+# ==========================================
+# --- 6. ADMIN: TXT FAYL YUKLASH ---
+# ==========================================
+class AdminWordListState(StatesGroup):
+    waiting_for_txt = State()
+
+@dp.callback_query(F.data == "adm_upload_words")
+async def upload_words_cb(call: types.CallbackQuery, state: FSMContext):
+    await call.message.answer(
+        "📁 <b>So'zlar ro'yxatini yuboring:</b>\n\n"
+        "📌 <b>Format:</b> <code>hello, call, low, world</code>\n"
+        "   (vergul bilan ajratilgan yoki har qatorda bitta so'z)\n\n"
+        "✅ TXT fayl yoki oddiy matn sifatida yuboring:",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminWordListState.waiting_for_txt)
+    await call.answer()
+
+@dp.message(AdminWordListState.waiting_for_txt, F.chat.id == ADMIN_ID)
+async def process_word_list_upload(m: types.Message, state: FSMContext):
+    from auto_scraper import upload_word_list
+    await state.clear()
+
+    text = ""
+
+    # TXT fayl yuborilgan bo'lsa
+    if m.document and m.document.mime_type == "text/plain":
+        try:
+            file = await bot.get_file(m.document.file_id)
+            file_bytes = await bot.download_file(file.file_path)
+            text = file_bytes.read().decode("utf-8")
+        except Exception as e:
+            return await m.answer(f"❌ Faylni o'qishda xato: {e}")
+    # Oddiy matn yuborilgan bo'lsa
+    elif m.text:
+        text = m.text
+    else:
+        return await m.answer("❌ Faqat TXT fayl yoki matn yuboring.")
+
+    wait = await m.answer("⏳ Ro'yxat saqlanmoqda...")
+    count, words = upload_word_list(text)
+
+    if count == 0:
+        await wait.edit_text("❌ Ro'yxat bo'sh yoki noto'g'ri format!")
+        return
+
+    preview = ", ".join(words[:10])
+    if len(words) > 10:
+        preview += f" ... va yana {len(words)-10} ta"
+
+    await wait.edit_text(
+        f"✅ <b>Ro'yxat saqlandi!</b>\n\n"
+        f"📊 Jami so'zlar: <b>{count} ta</b>\n"
+        f"👀 Namuna: <code>{preview}</code>\n\n"
+        f"🚀 Scraper avtomatik boshlanadi!",
+        parse_mode="HTML"
+    )
