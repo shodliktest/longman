@@ -9,9 +9,10 @@ st.set_page_config(page_title="Longman AI Dashboard", page_icon="📕", layout="
 from bot_handlers import dp, bot
 from database import (
     get_all_users, get_stats, increment_page_view,
-    get_daily_word_stats, get_daily_user_stats, get_word_list_info
+    get_daily_word_stats, get_daily_user_stats
 )
-from auto_scraper import start_scraper_thread, set_bot, upload_word_list
+from auto_scraper import start_scraper_thread, set_bot, upload_word_list, ram_get_info, ram_clear_word_list
+from database import save_word_list
 from config import ADMIN_ID
 
 st.markdown("""
@@ -32,7 +33,6 @@ try:
     word_stats   = get_daily_word_stats()
     user_stats   = get_daily_user_stats()
     latest_users = get_all_users(limit_count=50)
-    word_list_info = get_word_list_info()
 
     total_words       = sum([w['count'] for w in word_stats]) if word_stats else 0
     total_users_count = stats.get('total_users', 0)
@@ -87,40 +87,56 @@ try:
         st.write("Hozircha foydalanuvchilar yo'q.")
 
     # ══════════════════════════════════════════════════
-    # 📁 SO'ZLAR RO'YXATINI YUKLASH BO'LIMI
+    # 📁 SO'ZLAR RO'YXATINI YUKLASH BO'LIMI (RAM CACHE)
     # ══════════════════════════════════════════════════
     st.markdown("---")
     st.markdown("### 📁 So'zlar Ro'yxatini Boshqarish")
 
+    cache_info = ram_get_info()
+    scraper_active = any(t.name == "ScraperThread" for t in threading.enumerate())
+
     col_info, col_upload = st.columns([1, 2])
 
     with col_info:
-        st.markdown("#### 📊 Joriy Holat")
-        st.metric("📋 Ro'yxatdagi so'zlar", f"{word_list_info['count']} ta")
-        st.caption(f"🕐 Oxirgi yangilanish: {word_list_info['updated_at']}")
+        st.markdown("#### 💾 RAM Cache Holati")
 
-        if word_list_info['count'] > 0:
-            scraper_threads = [t for t in threading.enumerate() if t.name == "ScraperThread"]
-            if scraper_threads:
-                st.success("🟢 Scraper ishlayapti")
-            else:
-                st.warning("🟡 Scraper to'xtagan")
-
-            # Namuna so'zlar
-            sample = word_list_info['words'][:20]
-            if sample:
-                st.caption("Namuna: " + ", ".join(sample))
+        if scraper_active:
+            st.success("🟢 Scraper ishlayapti")
         else:
-            st.info("📭 Ro'yxat bo'sh. TXT fayl yuklang.")
+            st.warning("🟡 Scraper kutmoqda")
+
+        total     = cache_info['total']
+        remaining = cache_info['remaining']
+        done      = cache_info['done']
+
+        st.metric("📋 Jami yuklangan", f"{total} ta")
+        if total > 0:
+            col_a, col_b = st.columns(2)
+            col_a.metric("✅ Bajarildi", f"{done} ta")
+            col_b.metric("⏳ Qoldi",     f"{remaining} ta")
+            pct = done / total if total else 0
+            st.progress(pct, text=f"{int(pct*100)}% bajarildi")
+            st.caption(f"📡 Manba: **{cache_info['source']}**")
+            st.caption(f"🕐 Yuklangan: {cache_info['uploaded_at']}")
+            st.caption("💡 Sahifa yangilansa ham saqlanadi. Faqat reboot yoki o'chirganda o'chadi.")
+            if cache_info['preview']:
+                st.caption("Navbatdagi: " + ", ".join(cache_info['preview'][:10]))
+            if st.button("🗑 Cache ni Tozalash", type="secondary"):
+                ram_clear_word_list()
+                st.success("✅ Cache tozalandi!")
+                st.rerun()
+        else:
+            st.info("📭 Cache bo'sh. TXT fayl yuklang.")
 
     with col_upload:
         st.markdown("#### ⬆️ Yangi Ro'yxat Yuklash")
-        st.caption("📌 Format: `hello, call, low, world` (vergul bilan) yoki har qatorda bitta so'z")
+        st.caption("📌 Format: `hello, call, low` (vergul) yoki har qatorda bitta so'z")
+        st.caption("💾 Yuklangandan so'ng RAM da saqlanadi — sahifa yangilansa ham yo'qolmaydi")
 
         uploaded_file = st.file_uploader(
             "TXT fayl tanlang",
             type=["txt"],
-            help="Vergul bilan ajratilgan yoki har qatorda bitta so'z bo'lgan TXT fayl"
+            help="Vergul yoki yangi qator bilan ajratilgan so'zlar"
         )
 
         manual_text = st.text_area(
@@ -129,9 +145,8 @@ try:
             height=100
         )
 
-        if st.button("🚀 Ro'yxatni Yuklash va Scraperga Yuborish", type="primary"):
+        if st.button("🚀 Yuklash va Scraperga Yuborish", type="primary"):
             text_to_upload = ""
-
             if uploaded_file is not None:
                 text_to_upload = uploaded_file.read().decode("utf-8")
             elif manual_text.strip():
@@ -140,8 +155,8 @@ try:
                 st.error("❌ Fayl yoki matn kiriting!")
                 st.stop()
 
-            with st.spinner("⏳ Saqlanmoqda..."):
-                count, words = upload_word_list(text_to_upload)
+            with st.spinner("⏳ RAM Cache ga saqlanmoqda..."):
+                count, words = upload_word_list(text_to_upload, source="web")
 
             if count == 0:
                 st.error("❌ Ro'yxat bo'sh yoki noto'g'ri format!")
@@ -149,7 +164,11 @@ try:
                 preview = ", ".join(words[:15])
                 if len(words) > 15:
                     preview += f" ... va yana {len(words)-15} ta"
-                st.success(f"✅ **{count} ta so'z** saqlandi! Scraper avtomatik boshlanadi.")
+                st.success(
+                    f"✅ **{count} ta so'z** RAM Cache ga saqlandi!\n\n"
+                    f"💾 Sahifa yangilansa ham saqlanadi.\n"
+                    f"🚀 Scraper avtomatik boshlanadi."
+                )
                 st.caption(f"Namuna: {preview}")
                 st.rerun()
 

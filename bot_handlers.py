@@ -310,7 +310,7 @@ async def upload_words_cb(call: types.CallbackQuery, state: FSMContext):
 
 @dp.message(AdminWordListState.waiting_for_txt, F.chat.id == ADMIN_ID)
 async def process_word_list_upload(m: types.Message, state: FSMContext):
-    from auto_scraper import upload_word_list
+    from auto_scraper import upload_word_list, ram_get_info
     await state.clear()
 
     text = ""
@@ -323,14 +323,13 @@ async def process_word_list_upload(m: types.Message, state: FSMContext):
             text = file_bytes.read().decode("utf-8")
         except Exception as e:
             return await m.answer(f"❌ Faylni o'qishda xato: {e}")
-    # Oddiy matn yuborilgan bo'lsa
     elif m.text:
         text = m.text
     else:
         return await m.answer("❌ Faqat TXT fayl yoki matn yuboring.")
 
-    wait = await m.answer("⏳ Ro'yxat saqlanmoqda...")
-    count, words = upload_word_list(text)
+    wait = await m.answer("⏳ RAM Cache ga saqlanmoqda...")
+    count, words = upload_word_list(text, source="telegram")
 
     if count == 0:
         await wait.edit_text("❌ Ro'yxat bo'sh yoki noto'g'ri format!")
@@ -340,10 +339,54 @@ async def process_word_list_upload(m: types.Message, state: FSMContext):
     if len(words) > 10:
         preview += f" ... va yana {len(words)-10} ta"
 
+    info = ram_get_info()
     await wait.edit_text(
-        f"✅ <b>Ro'yxat saqlandi!</b>\n\n"
+        f"✅ <b>Ro'yxat RAM Cache ga saqlandi!</b>\n\n"
         f"📊 Jami so'zlar: <b>{count} ta</b>\n"
+        f"📡 Manba: <b>Telegram</b>\n"
+        f"🕐 Vaqt: <b>{info['uploaded_at']}</b>\n"
         f"👀 Namuna: <code>{preview}</code>\n\n"
+        f"💾 <i>Sahifa yangilansa ham saqlanadi.</i>\n"
+        f"🔄 <i>Faqat reboot yoki o'chirganda o'chadi.</i>\n\n"
         f"🚀 Scraper avtomatik boshlanadi!",
         parse_mode="HTML"
     )
+
+@dp.callback_query(F.data == "adm_cache_info")
+async def cache_info_cb(call: types.CallbackQuery):
+    """RAM Cache holati haqida ma'lumot."""
+    from auto_scraper import ram_get_info
+    info = ram_get_info()
+    scraper_active = any(t.name == "ScraperThread" for t in __import__('threading').enumerate())
+
+    if info['count'] == 0:
+        msg = (
+            f"💾 <b>RAM Cache holati:</b>\n\n"
+            f"📭 Cache bo'sh.\n"
+            f"📋 So'zlar ro'yxati yuklanmagan."
+        )
+    else:
+        preview = ", ".join(info['words'][:15])
+        if info['count'] > 15:
+            preview += f" ... va yana {info['count']-15} ta"
+        msg = (
+            f"💾 <b>RAM Cache holati:</b>\n\n"
+            f"📋 So'zlar: <b>{info['count']} ta</b>\n"
+            f"📡 Manba: <b>{info['source']}</b>\n"
+            f"🕐 Yuklangan: <b>{info['uploaded_at']}</b>\n"
+            f"🤖 Scraper: {'🟢 Ishlayapti' if scraper_active else '🔴 To\'xtagan'}\n\n"
+            f"👀 Namuna: <code>{preview}</code>\n\n"
+            f"💡 <i>Reboot bo'lmaguncha yoki siz o'chirmaguncha saqlanadi.</i>"
+        )
+    await call.message.answer(msg, parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data == "adm_cache_clear")
+async def cache_clear_cb(call: types.CallbackQuery):
+    """RAM Cache ni tozalash."""
+    from auto_scraper import ram_clear_word_list
+    from database import save_word_list
+    ram_clear_word_list()
+    save_word_list([])
+    await call.message.answer("🗑 <b>RAM Cache tozalandi!</b>\nScraper to'xtadi.", parse_mode="HTML")
+    await call.answer()

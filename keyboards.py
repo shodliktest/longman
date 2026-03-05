@@ -36,6 +36,8 @@ def get_admin_kb():
     kb.button(text="📋 Userlar Ro'yxati", callback_data="adm_list_menu")
     kb.button(text="📢 Broadcast", callback_data="adm_bc")
     kb.button(text="📁 So'zlar Ro'yxatini Yuklash", callback_data="adm_upload_words")
+    kb.button(text="💾 RAM Cache Holati", callback_data="adm_cache_info")
+    kb.button(text="🗑 Cache ni Tozalash", callback_data="adm_cache_clear")
     kb.adjust(1)
     return kb.as_markup()
 
