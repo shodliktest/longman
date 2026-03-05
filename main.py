@@ -114,6 +114,5 @@ def run_bot_in_background():
 
 run_bot_in_background()
 
-# --- AVTO-SCRAPERNI ISHGA TUSHIRISH (faqat bir marta, Streamlit qayta yuklasada xavfsiz) ---
-if not any(t.name == "ScraperThread" for t in threading.enumerate()):
-    start_scraper_thread()
+# --- AVTO-SCRAPERNI ISHGA TUSHIRISH ---
+start_scraper_thread()

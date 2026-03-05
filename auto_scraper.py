@@ -1,138 +1,67 @@
 import threading
 import time
 import requests
-from bs4 import BeautifulSoup
 from database import get_word_cache, save_word_cache
 from scraper import scrape_longman_ultimate
 
 # ═══════════════════════════════════════════════════════════════
-#  AVTO-SCRAPER — Longman saytining o'z so'zlar ro'yxatidan
-#  Telegram botdan mustaqil, hech qachon to'xtamaydi
+#  AVTO-SCRAPER — 20,000 ta eng ko'p ishlatiladigan ingliz so'zi
+#  Threading asosida, hech qachon to'xtamaydi
 # ═══════════════════════════════════════════════════════════════
 
-SITEMAP_INDEX   = "https://www.ldoceonline.com/sitemap.xml"
-DELAY_WORDS     = 8     # So'zlar orasidagi pauza (soniya) — sayt bloklamasligi uchun
-DELAY_ON_ERROR  = 30    # Scraping xatosida kutish (soniya)
-DELAY_RESTART   = 120   # Butun ro'yxat tugaganda qayta boshlash (soniya)
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)"}
-
-# Faqat shu yo'llar bilan boshlanadigan URL'lar qabul qilinadi
-ALLOWED_PATH_PREFIXES = ("/dictionary/",)
-
-# Bu pattern bo'lgan URL'lar o'tkazib yuboriladi (english-japanese, english-chinese va h.k.)
-SKIP_PATTERNS = (
-    "english-japanese",
-    "english-chinese",
-    "english-french",
-    "english-german",
-    "english-spanish",
-    "english-italian",
-    "english-portuguese",
-    "english-polish",
-    "english-arabic",
-    "english-russian",
-    "business-english",
-    "pictures",
-    "topic",
-    "grammar",
-    "speaking",
-    "writing",
-    "pronunciation",
-)
+WORDS_URL     = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/20k.txt"
+DELAY_WORDS   = 5    # So'zlar orasidagi pauza (soniya) — sayt bloklamasligi uchun
+DELAY_ERROR   = 30   # Xato bo'lganda kutish (soniya)
+DELAY_RESTART = 300  # Ro'yxat tugagandan keyin qayta boshlash (soniya)
 
 
-def _fetch_sitemap_urls(url):
-    """Berilgan sitemap URL'dan barcha <loc> manzillarini qaytaradi."""
+def _fetch_word_list():
+    """GitHub'dan 20,000 ta so'zni streaming usulda yuklaydi (RAM tejovchi)."""
+    print(f"📥 So'zlar ro'yxati yuklanmoqda: {WORDS_URL}")
     for attempt in range(1, 4):
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
-            if resp.status_code == 200:
-                soup = BeautifulSoup(resp.content, "lxml-xml")
-                return [loc.text.strip() for loc in soup.find_all("loc")]
-            print(f"⚠️ Sitemap HTTP {resp.status_code}: {url}")
+            response = requests.get(WORDS_URL, stream=True, timeout=15)
+            if response.status_code == 200:
+                words = []
+                for line in response.iter_lines():
+                    if line:
+                        word = line.decode('utf-8').strip().lower()
+                        if len(word) >= 2:
+                            words.append(word)
+                print(f"✅ {len(words)} ta so'z yuklandi.")
+                return words
+            else:
+                print(f"⚠️ HTTP {response.status_code} — ro'yxat yuklanmadi.")
         except Exception as e:
-            print(f"❌ Sitemap yuklanmadi [{attempt}/3]: {e}")
+            print(f"❌ Yuklash xatosi [{attempt}/3]: {e}")
         time.sleep(10)
     return []
-
-
-def _is_valid_word_url(url):
-    """
-    Faqat /dictionary/ bo'limidagi, english-japanese kabi tarjima sahifalarisiz URLlarni qabul qiladi.
-    """
-    from urllib.parse import urlparse
-    path = urlparse(url).path
-    # Faqat /dictionary/ bilan boshlanishi shart
-    if not any(path.startswith(p) for p in ALLOWED_PATH_PREFIXES):
-        return False
-    # Keraksiz pattern'larni o'tkazib yuborish
-    if any(skip in url for skip in SKIP_PATTERNS):
-        return False
-    return True
-
-
-def _get_all_word_urls():
-    """
-    Longman sitemap.xml dan barcha lug'at so'z sahifalarini topadi.
-    Sitemap index bo'lsa — har bir kichik sitemapni ham tekshiradi.
-    Faqat /dictionary/ yo'lidagi URLlarni qaytaradi.
-    """
-    print(f"📥 Longman sitemap yuklanmoqda: {SITEMAP_INDEX}")
-    all_locs = _fetch_sitemap_urls(SITEMAP_INDEX)
-
-    if not all_locs:
-        print("❌ Sitemap bo'sh yoki yuklanmadi.")
-        return []
-
-    word_urls = []
-
-    for loc in all_locs:
-        if "sitemap" in loc.lower() and loc.endswith(".xml"):
-            # Bu kichik sitemap — uning ichidagi URLlarni olish
-            sub_locs = _fetch_sitemap_urls(loc)
-            for u in sub_locs:
-                if _is_valid_word_url(u):
-                    word_urls.append(u)
-        elif _is_valid_word_url(loc):
-            word_urls.append(loc)
-
-    # Takrorlarni olib tashlash, tartibga keltirish
-    word_urls = list(dict.fromkeys(word_urls))
-    print(f"✅ {len(word_urls)} ta so'z sahifasi topildi.")
-    return word_urls
-
-
-def _url_to_word(url):
-    """
-    https://www.ldoceonline.com/dictionary/hello-world
-    → "hello-world"  (Longman scraper shu ko'rinishdagi so'zlarni qabul qiladi)
-    """
-    return url.rstrip("/").split("/dictionary/")[-1]
 
 
 def _scraper_loop():
     """
     Asosiy sikl — hech qachon to'xtamaydi:
-      - Telegram xatosi   → ta'sir qilmaydi (mustaqil thread)
-      - Scraping xatosi   → DELAY_ON_ERROR soniya kutib, keyingi so'zga o'tadi
-      - Ro'yxat tugasa    → qaytadan boshidan boshlaydi
+      - Network xatosi    → DELAY_ERROR soniya kutib, keyingi so'zga o'tadi
+      - Scraping xatosi   → xuddi shunday
+      - Ro'yxat tugasa    → DELAY_RESTART soniya kutib, qaytadan boshidan
+      - Streamlit restart → daemon thread bo'lgani uchun ta'sir qilmaydi
     """
-    print("🚀 Avto-scraper LONGMAN SITEMAP rejimida ishga tushdi!")
+    print("🚀 Avto-scraper ishga tushdi! 20k so'zlar rejimi faollashdi.")
 
     while True:
-        word_urls = _get_all_word_urls()
+        words = _fetch_word_list()
 
-        if not word_urls:
-            print(f"⏳ So'z topilmadi. {DELAY_RESTART}s kutib qayta urinadi...")
+        if not words:
+            print(f"⏳ Ro'yxat yuklanmadi. {DELAY_RESTART}s kutib qayta urinadi...")
             time.sleep(DELAY_RESTART)
             continue
 
-        for url in word_urls:
-            word = _url_to_word(url)
-            if not word or len(word) < 2:
-                continue
+        skipped = 0
+        saved   = 0
+        errors  = 0
 
-            # ── Firebase'da borligini tekshir ─────────────────────────
+        for word in words:
+            # ── Firebase'da borligini tekshir ────────────────────────
             try:
                 existing = get_word_cache(word)
             except Exception as e:
@@ -140,16 +69,18 @@ def _scraper_loop():
                 existing = None
 
             if existing:
-                continue  # Allaqachon bor — keyingisiga
+                skipped += 1
+                continue  # Allaqachon bor — keyingisiga (pauza yo'q, tez o'tadi)
 
-            # ── Longman saytidan yuklab ol (3 marta urinish) ──────────
+            # ── Longman saytidan yuklab ol ────────────────────────────
             success = False
             for attempt in range(1, 4):
                 try:
                     data = scrape_longman_ultimate(word)
                     if data:
                         save_word_cache(word, data)
-                        print(f"✅ Saqlandi [{attempt}/3]: {word}")
+                        print(f"✅ Saqlandi: {word}  (skip={skipped}, saved={saved+1})")
+                        saved += 1
                     else:
                         print(f"⚠️ Topilmadi: {word}")
                     success = True
@@ -157,14 +88,19 @@ def _scraper_loop():
                 except Exception as e:
                     print(f"❌ Xato [{attempt}/3] ({word}): {e}")
                     if attempt < 3:
-                        time.sleep(DELAY_ON_ERROR)
+                        time.sleep(DELAY_ERROR)
 
             if not success:
-                print(f"🔁 {word} o'tkazib yuborildi.")
+                errors += 1
+                print(f"🔁 O'tkazib yuborildi: {word}  (errors={errors})")
 
             time.sleep(DELAY_WORDS)
 
-        print(f"♻️  Barcha so'zlar ko'rib chiqildi! {DELAY_RESTART}s kutib qayta boshlanadi...")
+        print(
+            f"♻️  20k ro'yxat tugadi! "
+            f"saqlandi={saved}, o'tkazildi(bor edi)={skipped}, xato={errors}. "
+            f"{DELAY_RESTART}s kutib qayta boshlanadi..."
+        )
         time.sleep(DELAY_RESTART)
 
 
@@ -174,14 +110,19 @@ def _scraper_loop():
 
 def start_scraper_thread():
     """
-    Scraperiyi Telegram botdan butunlay ajratilgan daemon thread'da ishlatadi.
+    Scraperiyi Telegram bot va Streamlit'dan butunlay ajratilgan
+    daemon thread'da ishlatadi. Streamlit qayta yuklansa ham to'xtamaydi.
     """
+    if any(t.name == "ScraperThread" for t in threading.enumerate()):
+        print("ℹ️  ScraperThread allaqachon ishlamoqda.")
+        return None
+
     t = threading.Thread(target=_scraper_loop, name="ScraperThread", daemon=True)
     t.start()
-    print("🧵 ScraperThread ishga tushirildi (Telegram'dan mustaqil).")
+    print("🧵 ScraperThread ishga tushirildi (Telegram va Streamlit'dan mustaqil).")
     return t
 
 
-# Eski asyncio versiyasi bilan moslik
+# Eski asyncio versiyasi bilan moslik (main.py o'zgartirmaslik uchun)
 async def auto_fill_database():
     start_scraper_thread()
