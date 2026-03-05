@@ -355,28 +355,40 @@ async def process_word_list_upload(m: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "adm_cache_info")
 async def cache_info_cb(call: types.CallbackQuery):
     """RAM Cache holati haqida ma'lumot."""
+    import threading
     from auto_scraper import ram_get_info
     info = ram_get_info()
-    scraper_active = any(t.name == "ScraperThread" for t in __import__('threading').enumerate())
+    scraper_active = any(t.name == "ScraperThread" for t in threading.enumerate())
 
-    if info['count'] == 0:
+    total     = info['total']
+    remaining = info['remaining']
+    done      = info['done']
+    source    = info['source']
+    uploaded  = info['uploaded_at']
+    preview   = info['preview']
+
+    if total == 0:
         msg = (
-            f"💾 <b>RAM Cache holati:</b>\n\n"
-            f"📭 Cache bo'sh.\n"
-            f"📋 So'zlar ro'yxati yuklanmagan."
+            "💾 <b>RAM Cache holati:</b>\n\n"
+            "📭 Cache bo'sh.\n"
+            "📋 So'zlar ro'yxati yuklanmagan."
         )
     else:
-        preview = ", ".join(info['words'][:15])
-        if info['count'] > 15:
-            preview += f" ... va yana {info['count']-15} ta"
+        pct = int(done / total * 100) if total else 0
+        prev_text = ", ".join(preview[:15])
+        if len(preview) > 15:
+            prev_text += f" ... va yana {remaining - 15} ta"
         msg = (
             f"💾 <b>RAM Cache holati:</b>\n\n"
-            f"📋 So'zlar: <b>{info['count']} ta</b>\n"
-            f"📡 Manba: <b>{info['source']}</b>\n"
-            f"🕐 Yuklangan: <b>{info['uploaded_at']}</b>\n"
-            f"🤖 Scraper: {'🟢 Ishlayapti' if scraper_active else '🔴 To\'xtagan'}\n\n"
-            f"👀 Namuna: <code>{preview}</code>\n\n"
-            f"💡 <i>Reboot bo'lmaguncha yoki siz o'chirmaguncha saqlanadi.</i>"
+            f"📋 Jami yuklangan: <b>{total} ta</b>\n"
+            f"✅ Bajarildi: <b>{done} ta</b>\n"
+            f"⏳ Qoldi: <b>{remaining} ta</b>\n"
+            f"📊 Progress: <b>{pct}%</b>\n"
+            f"📡 Manba: <b>{source}</b>\n"
+            f"🕐 Yuklangan: <b>{uploaded}</b>\n"
+            f"🤖 Scraper: {'🟢 Ishlayapti' if scraper_active else '🔴 Kutmoqda'}\n\n"
+            f"👀 Navbatdagi: <code>{prev_text}</code>\n\n"
+            f"💡 <i>Reboot bo'lmaguncha saqlanadi.</i>"
         )
     await call.message.answer(msg, parse_mode="HTML")
     await call.answer()
