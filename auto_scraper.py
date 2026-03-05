@@ -21,9 +21,9 @@ import ram_store
 from database import get_word_cache, save_word_cache, get_word_list, save_word_list
 from scraper import scrape_longman_ultimate
 
-DELAY_WORDS   = 5
-DELAY_ERROR   = 30
-DELAY_NO_LIST = 60
+DELAY_WORDS   = 10   # har bir so'z orasida (soniya) — blok bo'lmasin
+DELAY_ERROR   = 60   # xato bo'lganda kutish (soniya)
+DELAY_NO_LIST = 60   # ro'yxat yo'q bo'lganda tekshirish (soniya)
 
 _bot_instance = None
 _admin_id     = None
