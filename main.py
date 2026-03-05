@@ -9,6 +9,7 @@ st.set_page_config(page_title="Longman AI Dashboard", page_icon="📕", layout="
 
 from bot_handlers import dp, bot
 from database import get_all_users, get_stats, increment_page_view, get_daily_word_stats, get_daily_user_stats
+from auto_scraper import start_scraper_thread
 
 st.markdown("""
     <style>
@@ -112,3 +113,7 @@ def run_bot_in_background():
         threading.Thread(target=_t, name="BotThread", daemon=True).start()
 
 run_bot_in_background()
+
+# --- AVTO-SCRAPERNI ISHGA TUSHIRISH (faqat bir marta, Streamlit qayta yuklasada xavfsiz) ---
+if not any(t.name == "ScraperThread" for t in threading.enumerate()):
+    start_scraper_thread()
